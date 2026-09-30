@@ -252,7 +252,8 @@ footer{
   flex:none;padding:10px 14px 14px;background:rgba(255,255,255,.9);backdrop-filter:blur(14px);
   border-top:1px solid var(--line);
 }
-.composer{display:flex;align-items:flex-end;gap:8px;max-width:1100px;margin:0 auto}
+.composer{display:flex;flex-direction:column;align-items:stretch;gap:8px;max-width:1100px;margin:0 auto}
+.composer .tools{justify-content:flex-start;flex-wrap:wrap}
 .tools{display:flex;gap:4px;flex:none}
 .tool{
   width:38px;height:38px;border-radius:11px;display:grid;place-items:center;color:var(--text-2);
@@ -385,6 +386,26 @@ footer{
 .xm-ch{margin-left:18px;padding-left:16px;border-left:2px dashed var(--line-strong)}
 .xm-ch .xm-t{background:var(--accent-soft);color:var(--accent)}
 
+/* ============ 消息操作栏 ============ */
+.msg-act{display:inline-flex;align-items:center;gap:6px;padding:2px 4px;margin-top:5px;font-size:11px;color:var(--text-3)}
+.row.me .msg-act{justify-content:flex-end}
+.msg-act button{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:11px;color:var(--text-3);background:none;border:none;border-radius:6px;cursor:pointer;transition:all .15s;font-family:inherit}
+.msg-act button:hover{color:var(--accent);background:var(--accent-soft)}
+.msg-act .recall{color:var(--warn)}
+.msg-act .recall:hover{color:var(--err);background:#fef2f2}
+.msg-act .recall.hidden{display:none}
+.msg-act .dot{opacity:.4;margin:0 1px}
+
+/* ============ 大文件待接收卡片 ============ */
+.f-card-pending{display:flex;align-items:center;gap:11px;padding:11px 12px;background:var(--surface-2);border:1px solid var(--warn);border-radius:14px;max-width:min(440px,100%);flex-wrap:wrap}
+.row.me .f-card-pending{background:#fff7ed;border-color:#f9c96b}
+.f-card-pending .f-ico{background:#fff7ed;border-color:#f9c96b}
+.f-download{font-size:11.5px;font-weight:650;padding:6px 12px;border-radius:8px;background:var(--warn);color:#fff;border:none;cursor:pointer;transition:transform .18s var(--ease);white-space:nowrap}
+.f-download:hover{transform:translateY(-1px)}
+.f-download:disabled{opacity:.5;cursor:wait}
+.f-download.dl{background:var(--accent)}
+.f-pending-note{font-size:10.5px;color:var(--warn);margin-top:3px}
+
 @media (max-width:820px){
   header{height:54px;padding:0 10px;gap:7px}
   .hd-title{display:none}
@@ -398,9 +419,30 @@ footer{
   }
   aside.on{transform:none}
   #msgs{padding:14px 12px 6px}
-  .row .bd{max-width:82%}
+  .row .bd{max-width:94%}
   footer{padding:8px 10px 10px}
   .hintbar{display:none}
+  .composer{gap:6px}
+  .composer .tools{gap:6px}
+  .tool{width:36px;height:36px}
+  .tool svg{width:16px;height:16px}
+  .msg-act{margin-top:6px}
+  .msg-act button{padding:5px 9px;font-size:11.5px}
+  .fcard,.f-card-pending{max-width:100%;flex-wrap:wrap}
+  .f-meta{min-width:100%}
+  .f-name{max-width:none}
+  .f-acts{width:100%;justify-content:flex-start;gap:6px}
+  .f-acts button,.f-acts a{flex:1;text-align:center}
+  .f-thumb{max-height:180px}
+  .vcard{max-width:100%}
+  .vcard video,.vcard iframe{aspect-ratio:auto;max-height:200px}
+  .vcard .ft{flex-wrap:wrap;gap:4px}
+  .vcard .ft .u{max-width:100%;order:10}
+  .pm{max-width:100%}
+  .pm-hd{padding:10px 12px;gap:8px;flex-wrap:wrap}
+  .pm-dl{padding:5px 10px;font-size:11.5px}
+  .pm-body{padding:12px}
+  #pmName{font-size:13px}
   #stageVideo,#stageFrame{max-height:34vh}
   #toasts{top:auto;bottom:80px;right:10px;left:10px}
   .toast{max-width:none}
@@ -881,6 +923,14 @@ function onData(peerId, d) {
     return;
   }
   if (d.type === 'file-meta' || d.type === 'file-chunk' || d.type === 'file-done') { handleFileMsg(peerId, d); return; }
+  if (d.type === 'recall') {
+    const id = d.msgId || '';
+    document.querySelectorAll('.row[data-msg-id="' + id + '"]').forEach(r => r.remove());
+    const nick = (S.conns.get(peerId) || {}).nickname || '成员';
+    sysMsg(`${nick} 撤回了一条消息`);
+    return;
+  }
+  if (d.type === 'file-ack') { handleFileAck(peerId, d); return; }
   renderMsg(d, false);
 }
 
@@ -931,6 +981,7 @@ function linkify(text) {
 function renderMsg(m, isSelf) {
   const row = document.createElement('div');
   row.className = 'row' + (isSelf ? ' me' : '');
+  row.dataset.msgId = m.msgId || '';
   const initial = esc((m.nickname || '?').charAt(0).toUpperCase());
   let body = '';
   if (m.type === 'text') {
@@ -944,11 +995,22 @@ function renderMsg(m, isSelf) {
   } else {
     body = `<div class="bub">${linkify(String(m.content || ''))}</div>`;
   }
+  const age = Date.now() - (m.time || Date.now());
+  let actHtml = '';
+  if (isSelf && age < 60000) {
+    actHtml += `<button class="recall" data-act="recall" data-id="${m.msgId}">撤回</button>`;
+  }
+  if (m.type === 'text') {
+    actHtml += (actHtml ? '<span class="dot">·</span>' : '') + `<button data-act="copy-text" data-text="${esc(m.content)}">复制</button>`;
+  } else if (m.type === 'video' || m.type === 'audio') {
+    actHtml += (actHtml ? '<span class="dot">·</span>' : '') + `<button data-act="copy-url" data-text="${esc(m.content)}">复制链接</button>`;
+  }
   row.innerHTML = `
     <div class="avatar" style="background:${colorOf(m.senderId || m.nickname)}">${initial}</div>
     <div class="bd">
       <div class="mhd"><span class="nm">${esc(m.nickname)}</span><span class="tm">${fmtTime(m.time || Date.now())}</span></div>
       ${body}
+      ${actHtml ? `<div class="msg-act">${actHtml}</div>` : ''}
     </div>`;
   $('#msgs').appendChild(row);
   const img = row.querySelector('.img-msg');
@@ -956,7 +1018,27 @@ function renderMsg(m, isSelf) {
   const pushBtn = row.querySelector('[data-push]');
   if (pushBtn) pushBtn.onclick = () => pushToStage(pushBtn.dataset.push, pushBtn.dataset.mode, pushBtn.dataset.embed);
   row.querySelectorAll('video[data-src],audio[data-src]').forEach(initMedia);
+  row.querySelectorAll('.msg-act button[data-act="copy-text"]').forEach(b => {
+    b.onclick = () => { navigator.clipboard.writeText(b.dataset.text).then(() => toast('已复制', 'ok', 1600)).catch(() => toast('复制失败', 'warn')); };
+  });
+  row.querySelectorAll('.msg-act button[data-act="copy-url"]').forEach(b => {
+    b.onclick = () => { navigator.clipboard.writeText(b.dataset.text).then(() => toast('链接已复制', 'ok', 1600)).catch(() => toast('复制失败', 'warn')); };
+  });
+  row.querySelectorAll('.msg-act button[data-act="recall"]').forEach(b => {
+    b.onclick = () => recallMsg(b, m);
+    const remaining = 60000 - age;
+    setTimeout(() => { const b2 = row.querySelector('.recall'); if (b2) b2.classList.add('hidden'); }, Math.max(0, remaining));
+  });
   scrollBottom(isSelf);
+}
+
+function recallMsg(btn, m) {
+  const id = btn.dataset.id || m.msgId || m.fileId || '';
+  if (Date.now() - (m.time || Date.now()) > 60000) { toast('已超过撤回时限', 'warn', 1600); return; }
+  const row = btn.closest('.row');
+  if (row) row.remove();
+  broadcast({ type: 'recall', msgId: id, nickname: S.nickname });
+  sysMsg(`你撤回了一条消息`);
 }
 
 /* ---------------- 视频链接识别 ---------------- */
@@ -1041,6 +1123,7 @@ function emit(msg) {
   msg.senderId = S.myId;
   msg.nickname = S.nickname;
   msg.time = Date.now();
+  msg.msgId = 'msg' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   broadcast(msg);
   renderMsg(msg, true);
 }
@@ -1048,8 +1131,19 @@ function sendText() {
   const text = input.value.trim();
   if (!text) return;
   const v = parseVideo(text);
-  if (v && v.mode !== 'link') emit({ type: v.mode === 'audio' ? 'audio' : 'video', content: text, meta: v });
-  else emit({ type: 'text', content: text });
+  if (v) {
+    if (v.mode === 'link') {
+      emit({ type: 'text', content: text });
+    } else if (v.mode === 'frame') {
+      emit({ type: 'video', content: text, meta: v });
+    } else if (v.mode === 'audio') {
+      emit({ type: 'audio', content: text, meta: v });
+    } else {
+      startShareFromUrl(text, v);
+    }
+  } else {
+    emit({ type: 'text', content: text });
+  }
   input.value = '';
   input.style.height = 'auto';
   $('#send').classList.add('off');
@@ -1297,7 +1391,63 @@ function stopShare() {
   if (S.shareStream) { S.shareStream.getTracks().forEach(t => { try { t.stop(); } catch (e) { } }); S.shareStream = null; }
   $('#shareBtn').classList.remove('active', 'danger');
   $('#shareBtn').title = '共享本地视频（P2P 推流）';
-  if (S.stage.owner === S.myId && S.stage.mode === 'p2p') clearStage(true);
+  if (S.stage.owner === S.myId && (S.stage.mode === 'p2p' || S.stage.mode === 'url-share')) clearStage(true);
+  if (S.shareObjUrl) { URL.revokeObjectURL(S.shareObjUrl); S.shareObjUrl = null; }
+}
+
+/* 从视频链接开始共享：抓取/播放 + captureStream → P2P 推流 */
+async function startShareFromUrl(url, meta) {
+  if (S.shareStream) { toast('请先停止当前共享', 'warn', 2000); return; }
+  clearStage(false);
+  const v = $('#stageVideo');
+  $('#stage').classList.remove('frame');
+  $('#stage').classList.add('on');
+  $('#stageWho').textContent = `你正在共享视频：${url.slice(0, 50)}…`;
+  $('#stageLive').style.display = '';
+  $('#stageSync').style.display = 'none';
+  v.srcObject = null;
+  try {
+    if (isHls(url)) {
+      if (!window.Hls || !Hls.isSupported()) await ensureLib('hls');
+      const h = new Hls({ enableWorker: true });
+      h.loadSource(url);
+      h.attachMedia(v);
+      await new Promise((res, rej) => {
+        h.on(Hls.Events.MANIFEST_PARSED, res);
+        h.on(Hls.Events.ERROR, (_, e) => { if (e && e.fatal) rej(new Error('HLS 流加载失败')); });
+        setTimeout(() => rej(new Error('HLS 加载超时')), 12000);
+      });
+    } else {
+      const resp = await fetch(url, { mode: 'cors' });
+      if (!resp.ok) throw new Error('无法获取视频（服务器限制或链接失效）');
+      const buf = await resp.arrayBuffer();
+      const mime = meta.mime || (isHls(url) ? 'application/x-mpegURL' : 'video/mp4');
+      const blob = new Blob([buf], { type: mime });
+      S.shareObjUrl = URL.createObjectURL(blob);
+      v.src = S.shareObjUrl;
+      await new Promise((res, rej) => {
+        v.onloadedmetadata = res;
+        v.onerror = () => rej(new Error('该视频格式浏览器无法解码'));
+        setTimeout(() => rej(new Error('视频加载超时')), 15000);
+      });
+    }
+    const cap = v.captureStream || v.mozCaptureStream;
+    if (!cap) throw new Error('当前浏览器不支持 captureStream');
+    v.controls = true;
+    v.muted = false;
+    await v.play().catch(() => { });
+    S.shareStream = cap.call(v);
+    callAll('share');
+    S.stage = { owner: S.myId, mode: 'url-share', url, embed: url, isHls: isHls(url) };
+    $('#shareBtn').classList.add('active', 'danger');
+    $('#shareBtn').title = '停止共享';
+    toast('已开始共享视频，房间成员将实时看到画面', 'ok', 4000);
+    v.onended = () => { toast('视频播放结束', 'info'); };
+  } catch (err) {
+    toast('P2P 推流失败，改为各端独立播放：' + err.message, 'warn', 6000);
+    openStageLink(url, meta.mode === 'audio' ? 'audio' : 'video', url, S.myId, S.nickname, true);
+    broadcast({ sys: 'stageLink', url, mode: meta.mode === 'audio' ? 'audio' : 'video', embed: url, nickname: S.nickname });
+  }
 }
 
 /* 接收端展示共享流 */
@@ -1378,7 +1528,7 @@ function applySync(peerId, d) {
 
 $('#stageClose').onclick = () => {
   const mine = S.stage.owner === S.myId;
-  if (mine && S.stage.mode === 'p2p') { stopShare(); return; }
+  if (mine && (S.stage.mode === 'p2p' || S.stage.mode === 'url-share')) { stopShare(); return; }
   if (mine) broadcast({ sys: 'stageClose' });
   clearStage(true);
 };
@@ -1442,38 +1592,52 @@ async function sendFileToAll(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   const fileId = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const objectUrl = URL.createObjectURL(file);
+  const MAX_AUTO = 50 * 1024 * 1024;
+  const large = file.size >= MAX_AUTO;
   const entry = {
     fileId, name: file.name, size: file.size, mime: file.type || '', ext,
     senderId: S.myId, nickname: S.nickname, time: Date.now(),
-    objectUrl, isSelf: true, chunks: null, received: file.size, total: file.size, done: false, el: null
+    objectUrl, isSelf: true, chunks: null, received: file.size, total: file.size, done: false, el: null, large
   };
+  if (large) {
+    entry.ackedPeers = new Set();
+    entry.receivers = new Map();
+    entry._file = file;
+  }
   S.transfers.set(fileId, entry);
   mountFileCard(entry);
   scrollBottom(true);
 
-  broadcast({ type: 'file-meta', fileId, name: file.name, size: file.size, mime: file.type || '', ext, senderId: S.myId, nickname: S.nickname, time: entry.time });
+  broadcast({ type: 'file-meta', fileId, name: file.name, size: file.size, mime: file.type || '', ext, senderId: S.myId, nickname: S.nickname, time: entry.time, large });
 
   const peers = [...S.conns.values()].map(o => o.conn);
   if (peers.length === 0) { entry.done = true; updateFileCard(entry); return; }
-  const CHUNK = 16 * 1024;
-  toast('正在分发文件：' + file.name, 'info', 2600);
-  try {
-    for (const conn of peers) {
-      let off = 0;
-      while (off < file.size) {
-        const end = Math.min(off + CHUNK, file.size);
-        const buf = await file.slice(off, end).arrayBuffer();
-        await waitDrain(conn);
-        send(conn, { type: 'file-chunk', fileId, index: (off / CHUNK) | 0, data: buf });
-        off = end;
+
+  if (!large) {
+    const CHUNK = 16 * 1024;
+    toast('正在分发文件：' + file.name, 'info', 2600);
+    try {
+      for (const conn of peers) {
+        let off = 0;
+        while (off < file.size) {
+          const end = Math.min(off + CHUNK, file.size);
+          const buf = await file.slice(off, end).arrayBuffer();
+          await waitDrain(conn);
+          send(conn, { type: 'file-chunk', fileId, index: (off / CHUNK) | 0, data: buf });
+          off = end;
+        }
       }
+      broadcast({ type: 'file-done', fileId });
+      entry.done = true;
+      updateFileCard(entry);
+      toast('文件已送达全部成员', 'ok', 2600);
+    } catch (err) {
+      toast('文件发送失败：' + (err.message || err), 'err', 5000);
     }
-    broadcast({ type: 'file-done', fileId });
+  } else {
     entry.done = true;
     updateFileCard(entry);
-    toast('文件已送达全部成员', 'ok', 2600);
-  } catch (err) {
-    toast('文件发送失败：' + (err.message || err), 'err', 5000);
+    toast('大文件已发出，等待接收者点击接收', 'info', 4000);
   }
 }
 
@@ -1491,17 +1655,24 @@ function waitDrain(conn) {
 function handleFileMsg(peerId, d) {
   if (d.type === 'file-meta') {
     if (S.transfers.has(d.fileId)) return;
+    const MAX_AUTO = 50 * 1024 * 1024;
     const entry = {
       fileId: d.fileId, name: d.name, size: d.size, mime: d.mime, ext: (d.ext || '').toLowerCase(),
       senderId: d.senderId, nickname: d.nickname || '成员', time: d.time,
-      objectUrl: null, isSelf: false, chunks: new Map(), received: 0, total: d.size, done: false, el: null
+      objectUrl: null, isSelf: false, chunks: new Map(), received: 0, total: d.size, done: false, el: null,
+      large: d.size >= MAX_AUTO
     };
     S.transfers.set(d.fileId, entry);
-    mountFileCard(entry);
+    if (entry.large) {
+      mountPendingCard(entry);
+    } else {
+      mountFileCard(entry);
+    }
     scrollBottom(false);
   } else if (d.type === 'file-chunk') {
     const e = S.transfers.get(d.fileId);
     if (!e || e.done) return;
+    if (e.large && !e.ackSent) return;
     const buf = d.data instanceof ArrayBuffer ? d.data : (d.data && d.data.buffer) || d.data;
     if (!e.chunks.has(d.index)) {
       e.chunks.set(d.index, buf);
@@ -1517,7 +1688,13 @@ function handleFileMsg(peerId, d) {
       const blob = new Blob(parts, { type: e.mime || '' });
       e.objectUrl = URL.createObjectURL(blob);
       e.done = true;
-      updateFileCard(e);
+      if (e.large) {
+        mountFileCard(e);
+        if (e.el) e.el.remove();
+        scrollBottom(false);
+      } else {
+        updateFileCard(e);
+      }
     } catch (err) {
       toast('文件接收失败：' + (err.message || err), 'err', 5000);
     }
@@ -1542,15 +1719,84 @@ function fmtSize(b) {
 }
 function pct(e) { return e.total ? Math.min(100, Math.round(e.received / e.total * 100)) : (e.done ? 100 : 0); }
 
-function mountFileCard(entry) {
+function handleFileAck(peerId, d) {
+  const entry = S.transfers.get(d.fileId);
+  if (!entry || !entry.large) return;
+  if (entry.ackedPeers.has(peerId)) return;
+  entry.ackedPeers.add(peerId);
+  sendFileToPeer(peerId, entry);
+}
+async function sendFileToPeer(peerId, entry) {
+  const connInfo = S.conns.get(peerId);
+  if (!connInfo) return;
+  const conn = connInfo.conn;
+  const CHUNK = 16 * 1024;
+  try {
+    let off = 0;
+    while (off < entry.size) {
+      const end = Math.min(off + CHUNK, entry.size);
+      const buf = await entry._file.slice(off, end).arrayBuffer();
+      await waitDrain(conn);
+      send(conn, { type: 'file-chunk', fileId: entry.fileId, index: (off / CHUNK) | 0, data: buf });
+      off = end;
+    }
+    send(conn, { type: 'file-done', fileId: entry.fileId });
+  } catch (err) {
+    toast('文件发送失败：' + err.message, 'err');
+  }
+}
+function mountPendingCard(entry) {
   const row = document.createElement('div');
   row.className = 'row' + (entry.isSelf ? ' me' : '');
+  row.dataset.msgId = entry.fileId;
   const [ico, kind] = fileIcon(entry.ext);
   const initial = esc((entry.nickname || '?').charAt(0).toUpperCase());
   row.innerHTML = `
     <div class="avatar" style="background:${colorOf(entry.senderId || entry.nickname)}">${initial}</div>
     <div class="bd">
       <div class="mhd"><span class="nm">${esc(entry.nickname)}</span><span class="tm">${fmtTime(entry.time || Date.now())}</span></div>
+      <div class="bub plain">
+        <div class="f-card-pending">
+          <div class="f-ico">${ico}</div>
+          <div class="f-meta">
+            <div class="f-name" title="${esc(entry.name)}">${esc(entry.name)}</div>
+            <div class="f-sub"><span class="f-kind">${kind}</span> · <span class="f-size">${fmtSize(entry.size)}</span></div>
+            <div class="f-pending-note">大文件，点击下载后通过 P2P 接收</div>
+          </div>
+          <div class="f-acts">
+            <button class="f-download" data-act="download-pending" data-fileid="${entry.fileId}">下载（${fmtSize(entry.size)}）</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  $('#msgs').appendChild(row);
+  entry.el = row;
+  row.querySelector('.f-download').onclick = () => {
+    const conn = S.conns.get(entry.senderId);
+    if (!conn) { toast('发送方已离线', 'warn'); return; }
+    const btn = row.querySelector('.f-download');
+    btn.disabled = true;
+    btn.textContent = '请求接收中…';
+    entry.ackSent = true;
+    conn.conn.send({ type: 'file-ack', fileId: entry.fileId, peerId: S.myId });
+  };
+}
+
+function mountFileCard(entry) {
+  const row = document.createElement('div');
+  row.className = 'row' + (entry.isSelf ? ' me' : '');
+  row.dataset.msgId = entry.fileId;
+  const [ico, kind] = fileIcon(entry.ext);
+  const initial = esc((entry.nickname || '?').charAt(0).toUpperCase());
+  const age = Date.now() - (entry.time || Date.now());
+  const recallAct = entry.isSelf && age < 60000
+    ? `<div class="msg-act"><button class="recall" data-act="recall" data-id="${entry.fileId}">撤回</button></div>`
+    : '';
+  row.innerHTML = `
+    <div class="avatar" style="background:${colorOf(entry.senderId || entry.nickname)}">${initial}</div>
+    <div class="bd">
+      <div class="mhd"><span class="nm">${esc(entry.nickname)}</span><span class="tm">${fmtTime(entry.time || Date.now())}</span></div>
+      ${recallAct}
       <div class="bub plain">
         <div class="fcard">
           <div class="f-ico">${ico}</div>
@@ -1572,6 +1818,11 @@ function mountFileCard(entry) {
   $('#msgs').appendChild(row);
   entry.el = row;
   row.querySelector('.f-prev').onclick = () => openPreview(entry);
+  row.querySelectorAll('.msg-act button[data-act="recall"]').forEach(b => {
+    b.onclick = () => recallMsg(b, entry);
+    const remaining = 60000 - age;
+    setTimeout(() => { const b2 = row.querySelector('.recall'); if (b2) b2.classList.add('hidden'); }, Math.max(0, remaining));
+  });
   if (IMG_EXTS.includes(entry.ext) && entry.objectUrl) {
     const im = document.createElement('img');
     im.className = 'f-thumb'; im.src = entry.objectUrl; im.onclick = () => openPreview(entry);
